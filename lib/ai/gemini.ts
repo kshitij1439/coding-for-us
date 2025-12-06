@@ -164,7 +164,7 @@ ${fileContext ? `\nCurrent files:\n${fileContext}` : ""}`;
             ],
             config: {
                 temperature: 0.7,
-                maxOutputTokens: 8192,
+                maxOutputTokens: 14000,
                 systemInstruction: {
                     parts: [{ text: systemPrompt }],
                 },
