@@ -27,9 +27,26 @@ export default function CodeEditor({
 }: CodeEditorProps) {
     const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
-        new Set(["src"])
+        new Set()
     );
 
+    useEffect(() => {
+        const allFolders = new Set<string>();
+
+        files.forEach((file) => {
+            const parts = file.path.split("/");
+            let currentPath = "";
+
+            for (let i = 0; i < parts.length - 1; i++) {
+                currentPath = currentPath
+                    ? `${currentPath}/${parts[i]}`
+                    : parts[i];
+                allFolders.add(currentPath);
+            }
+        });
+
+        setExpandedFolders(allFolders);
+    }, [files]);
     // Auto-select first file
     useEffect(() => {
         if (files.length > 0 && !selectedFile) {
