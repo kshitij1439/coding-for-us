@@ -27,7 +27,11 @@ export default function ChatInterface({
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        messagesEndRef.current?.scrollIntoView({ 
+            behavior: "smooth",
+            block: "nearest",
+            inline: "nearest"
+        });
     }, [messages]);
 
     const handleSubmit = async (e: React.FormEvent) => {
