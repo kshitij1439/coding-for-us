@@ -4,6 +4,9 @@ import React, { useEffect, useState, useRef } from "react";
 import { useWebContainer } from "@/lib/webcontainer";
 import { Loader2, TerminalSquare, ExternalLink, Code, Zap } from "lucide-react";
 import MonacoEditor from "./Editor";
+import dynamic from "next/dynamic";
+
+const XTerminal = dynamic(() => import("./Terminal"), { ssr: false });
 
 interface FileItem {
     path: string;
@@ -15,15 +18,12 @@ interface PreviewPaneProps {
     code: string;
 }
 
-// Helper: parse "react@18.2.0" or "@scope/pkg@1.2.3"
 function parseDep(raw: string): { name: string; version?: string } {
     const dep = raw.trim();
     if (!dep) return { name: "" };
 
-    // Scoped packages: @scope/name[@version]
     if (dep.startsWith("@")) {
         const lastAt = dep.lastIndexOf("@");
-        // If there's a second '@' (position > 0), treat it as version delimiter
         if (lastAt > 0) {
             return {
                 name: dep.slice(0, lastAt),
@@ -33,13 +33,10 @@ function parseDep(raw: string): { name: string; version?: string } {
         return { name: dep };
     }
 
-    // Non-scoped: name[@version]
     const [name, version] = dep.split("@");
     return { name, version: version || undefined };
 }
 
-// Helper: convert ["react@18", "next", "@scope/pkg@1.0.0"]
-// to { react: "18", next: "latest", "@scope/pkg": "1.0.0" }
 function buildDepMap(list: string[] = []): Record<string, string> {
     const result: Record<string, string> = {};
     for (const raw of list) {
@@ -53,7 +50,6 @@ function buildDepMap(list: string[] = []): Record<string, string> {
 export default function PreviewPane({ code }: PreviewPaneProps) {
     const { webcontainer, isLoading: isBooting } = useWebContainer();
     const [url, setUrl] = useState<string>("");
-    const [logs, setLogs] = useState<string[]>([]);
     const [status, setStatus] = useState<
         "idle" | "mounting" | "installing" | "running" | "error"
     >("idle");
@@ -62,15 +58,15 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
     const [framework, setFramework] = useState<
         "react" | "expo" | "next" | "vite"
     >("react");
-
+    const terminalHandleRef = useRef<any>(null);
+    const xtermRef = useRef<any>(null);
     const processedCodeRef = useRef<string>("");
 
-    const addLog = (line: string) => {
-        setLogs((prev) => [
-            ...prev.slice(-50),
-            `${new Date().toLocaleTimeString()}: ${line}`,
-        ]);
-    };
+    useEffect(() => {
+        if (terminalHandleRef.current?.terminal) {
+            xtermRef.current = terminalHandleRef.current.terminal;
+        }
+    }, [terminalHandleRef.current?.terminal]);
 
     useEffect(() => {
         if (!webcontainer) return;
@@ -81,18 +77,22 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
         processedCodeRef.current = code;
 
         const runCode = async () => {
+            const term = xtermRef.current;
+
             try {
                 setStatus("mounting");
                 setShowCodeEditor(true);
-                addLog("🔍 Parsing TOON JSON...");
+
+                if (term) {
+                    term.writeln("");
+                    term.writeln("\x1b[1;36m→\x1b[0m Parsing TOON JSON...");
+                }
 
                 // 1. Parse JSON
                 const jsonMatch = code.match(/```json\n?([\s\S]*?)\n?```/);
                 if (!jsonMatch) throw new Error("No JSON code block found");
                 const toonJson = JSON.parse(jsonMatch[1]);
 
-                // 2. Robust Framework Detection
-                // If meta.fw says "react", we usually want "vite" behavior for the web container
                 let rawFw = toonJson.meta?.fw || "react";
                 if (rawFw === "react-vite") rawFw = "vite";
 
@@ -101,10 +101,15 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                 if (rawFw === "expo") detectedFramework = "expo";
                 else if (rawFw === "next") detectedFramework = "next";
                 else if (rawFw === "vite" || rawFw === "react")
-                    detectedFramework = "vite"; // Treat "react" as "vite"
+                    detectedFramework = "vite";
 
                 setFramework(detectedFramework);
-                addLog(`📱 Framework: ${detectedFramework}`);
+
+                if (term) {
+                    term.writeln(
+                        `\x1b[1;35m→\x1b[0m Framework: ${detectedFramework}`
+                    );
+                }
 
                 // 3. Extract Files
                 const extractedFiles: FileItem[] = (toonJson.files || []).map(
@@ -127,7 +132,6 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                     };
                 }
 
-                // 5. Dependency Management
                 const depsFromMeta: string[] = toonJson.meta?.deps || [
                     "react",
                     "react-dom",
@@ -136,7 +140,6 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                 const devDepsFromMeta: string[] = toonJson.meta?.devDeps || [];
                 const optimizedDevDeps = buildDepMap(devDepsFromMeta);
 
-                // Ensure critical deps exist based on framework
                 if (
                     detectedFramework === "vite" ||
                     detectedFramework === "react"
@@ -147,12 +150,10 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                     optimizedDevDeps["@vitejs/plugin-react"] ||= "latest";
                 }
 
-                // 6. Generate package.json if missing
                 if (!files["package.json"]) {
                     const scripts: Record<string, string> =
                         toonJson.meta?.scripts || {};
 
-                    // Force Vite scripts for React/Vite (Fixes the MIME type error)
                     if (!scripts.dev) {
                         if (detectedFramework === "next") {
                             scripts.dev = "next dev";
@@ -162,7 +163,7 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                             detectedFramework === "vite" ||
                             detectedFramework === "react"
                         ) {
-                            scripts.dev = "vite --host"; // Simple vite start
+                            scripts.dev = "vite --host";
                             scripts.build = "vite build";
                             scripts.preview = "vite preview";
                         } else {
@@ -187,7 +188,6 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                     };
                 }
 
-                // 7. Ensure Vite Config exists for React projects
                 if (
                     (detectedFramework === "vite" ||
                         detectedFramework === "react") &&
@@ -201,7 +201,7 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                     };
                 }
 
-                // 8. Ensure index.html exists
+                // 8. index.html
                 if (!files["index.html"]) {
                     files["index.html"] = {
                         file: {
@@ -210,25 +210,26 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                     };
                 }
 
-                addLog("📁 Mounting files...");
+                if (term) {
+                    term.writeln("\x1b[1;36m→\x1b[0m Mounting files...");
+                }
                 await webcontainer.mount(files);
 
-                // 9. Install Dependencies (With CI=true fix)
+                // 9. Install
                 setStatus("installing");
-                addLog("📦 Installing dependencies...");
+                if (term) {
+                    term.writeln(
+                        "\x1b[1;33m→\x1b[0m Installing dependencies..."
+                    );
+                }
 
                 const installProcess = await webcontainer.spawn(
                     "npm",
-                    [
-                        "install",
-                        "--no-audit",
-                        "--no-fund",
-                        "--legacy-peer-deps",
-                    ],
+                    ["install"],
                     {
-                        env: {
-                            CI: "true", // <--- DISALES SPINNER
-                            npm_config_loglevel: "warn",
+                        terminal: {
+                            cols: term?.cols || 80,
+                            rows: term?.rows || 24,
                         },
                     }
                 );
@@ -236,98 +237,108 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                 installProcess.output.pipeTo(
                     new WritableStream({
                         write(data) {
-                            // Aggressive cleaning to remove spinner artifacts
-                            const cleaned = data
-                                .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "") // ANSI codes
-                                .replace(/[\u2580-\u259F]/g, "") // Block chars
-                                .trim();
-
-                            if (
-                                cleaned &&
-                                !["|", "/", "-", "\\"].includes(cleaned)
-                            ) {
-                                // console.log("[npm]", cleaned);
-                                // Only log warnings/errors to UI to keep it clean
-                                if (
-                                    cleaned.toLowerCase().includes("warn") ||
-                                    cleaned.toLowerCase().includes("err")
-                                ) {
-                                    addLog(cleaned);
-                                }
+                            if (term) {
+                                term.write(data);
                             }
                         },
                     })
                 );
 
-                if ((await installProcess.exit) !== 0) {
+                const exitCode = await installProcess.exit;
+                if (exitCode !== 0) {
                     throw new Error("Installation failed");
                 }
 
-                addLog("✅ Dependencies installed");
+                if (term) {
+                    term.writeln("");
+                    term.writeln("\x1b[1;32m✓\x1b[0m Dependencies installed");
+                }
 
                 // 10. Start Server
                 setStatus("running");
-                addLog("🚀 Starting dev server...");
+                if (term) {
+                    term.writeln("\x1b[1;36m→\x1b[0m Starting dev server...");
+                    term.writeln("");
+                }
 
-                const devProcess = await webcontainer.spawn("npm", [
-                    "run",
-                    "dev",
-                ]);
+                const devProcess = await webcontainer.spawn(
+                    "npm",
+                    ["run", "dev"],
+                    {
+                        terminal: {
+                            cols: term?.cols || 80,
+                            rows: term?.rows || 24,
+                        },
+                    }
+                );
 
                 devProcess.output.pipeTo(
                     new WritableStream({
                         write(data) {
-                            const cleaned = data
-                                .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, "")
-                                .trim();
-                            if (cleaned) {
-                                // console.log("[server]", cleaned);
-                                if (
-                                    cleaned.includes("ready in") ||
-                                    cleaned.includes("Local:")
-                                ) {
-                                    addLog("⚡ Server Ready!");
-                                }
+                            if (term) {
+                                term.write(data);
                             }
                         },
                     })
                 );
 
-                webcontainer.on("server-ready", (port, url) => {
-                    addLog(`✅ Preview ready on ${url}`);
-                    setUrl(url);
+                webcontainer.on("server-ready", (port, serverUrl) => {
+                    if (term) {
+                        term.writeln("");
+                        term.writeln(
+                            `\x1b[1;32m✓\x1b[0m Server ready at ${serverUrl}`
+                        );
+                        term.writeln("");
+                    }
+                    setUrl(serverUrl);
                     setTimeout(() => setShowCodeEditor(false), 800);
                 });
             } catch (err) {
                 console.error(err);
                 setStatus("error");
-                addLog(
-                    `❌ Error: ${
-                        err instanceof Error ? err.message : String(err)
-                    }`
-                );
+                if (term) {
+                    term.writeln("");
+                    term.writeln(
+                        `\x1b[1;31m✗\x1b[0m Error: ${
+                            err instanceof Error ? err.message : String(err)
+                        }`
+                    );
+                    term.writeln("");
+                }
             }
         };
 
         runCode();
     }, [code, webcontainer, status]);
+
     const handleFileChange = async (path: string, newContent: string) => {
-        // 1. Update UI State (so the editor reflects the change immediately)
         setParsedFiles((prev) =>
             prev.map((f) =>
                 f.path === path ? { ...f, content: newContent } : f
             )
         );
 
-        // 2. Write to WebContainer (Vite HMR will pick this up automatically)
         if (webcontainer) {
             try {
                 await webcontainer.fs.writeFile(path, newContent);
+
+                // Log file change in terminal
+                if (xtermRef.current) {
+                    xtermRef.current.writeln(
+                        `\x1b[2m[${new Date().toLocaleTimeString()}] File updated: ${path}\x1b[0m`
+                    );
+                }
             } catch (err) {
                 console.error("Failed to write file:", err);
+                if (xtermRef.current) {
+                    xtermRef.current.writeln(
+                        `\x1b[1;31m✗\x1b[0m Failed to write ${path}`
+                    );
+                }
             }
         }
     };
+
     if (isBooting) {
         return (
             <div className="flex flex-col items-center justify-center h-full text-slate-400">
@@ -428,9 +439,9 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                 )}
             </div>
 
-            {/* Terminal */}
-            <div className="h-48 border-t border-slate-800 bg-black p-2 overflow-hidden flex flex-col">
-                <div className="flex items-center justify-between mb-2 px-2">
+            {/* XTerm Terminal */}
+            <div className="h-64 border-t border-slate-800 bg-black flex flex-col">
+                <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800">
                     <div className="flex items-center space-x-2 text-xs text-slate-400">
                         <TerminalSquare size={14} />
                         <span>Terminal</span>
@@ -441,13 +452,10 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                         </span>
                     </div>
                 </div>
-                <div className="flex-1 overflow-y-auto font-mono text-xs text-slate-300 p-2 space-y-1">
-                    {logs.map((log, i) => (
-                        <div key={i} className="whitespace-pre-wrap break-all">
-                            {log}
-                        </div>
-                    ))}
-                </div>
+                <XTerminal
+                    ref={terminalHandleRef}
+                    webcontainer={webcontainer}
+                />
             </div>
         </div>
     );
