@@ -24,6 +24,7 @@ function parseDep(raw: string): { name: string; version?: string } {
 
     if (dep.startsWith("@")) {
         const lastAt = dep.lastIndexOf("@");
+
         if (lastAt > 0) {
             return {
                 name: dep.slice(0, lastAt),
@@ -50,6 +51,7 @@ function buildDepMap(list: string[] = []): Record<string, string> {
 export default function PreviewPane({ code }: PreviewPaneProps) {
     const { webcontainer, isLoading: isBooting } = useWebContainer();
     const [url, setUrl] = useState<string>("");
+
     const [status, setStatus] = useState<
         "idle" | "mounting" | "installing" | "running" | "error"
     >("idle");
@@ -58,7 +60,6 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
     const [framework, setFramework] = useState<
         "react" | "expo" | "next" | "vite"
     >("react");
-    const [lastInstalledDeps, setLastInstalledDeps] = useState<string>("");
     const terminalHandleRef = useRef<any>(null);
     const xtermRef = useRef<any>(null);
     const processedCodeRef = useRef<string>("");
@@ -133,7 +134,10 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                     };
                 }
 
-                const depsFromMeta: string[] = toonJson.meta?.deps || [];
+                const depsFromMeta: string[] = toonJson.meta?.deps || [
+                    "react",
+                    "react-dom",
+                ];
                 const optimizedDeps = buildDepMap(depsFromMeta);
                 const devDepsFromMeta: string[] = toonJson.meta?.devDeps || [];
                 const optimizedDevDeps = buildDepMap(devDepsFromMeta);
@@ -142,10 +146,10 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                     detectedFramework === "vite" ||
                     detectedFramework === "react"
                 ) {
-                    optimizedDeps["react"] ||= "18.2.0";
-                    optimizedDeps["react-dom"] ||= "18.2.0";
-                    optimizedDevDeps["vite"] ||= "5.0.0";
-                    optimizedDevDeps["@vitejs/plugin-react"] ||= "4.2.0";
+                    optimizedDeps["react"] ||= "latest";
+                    optimizedDeps["react-dom"] ||= "latest";
+                    optimizedDevDeps["vite"] ||= "latest";
+                    optimizedDevDeps["@vitejs/plugin-react"] ||= "latest";
                 }
 
                 if (!files["package.json"]) {
@@ -213,154 +217,47 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                 }
                 await webcontainer.mount(files);
 
-                // 9. Check if we can skip installation
-                const depsHash = JSON.stringify({
-                    deps: optimizedDeps,
-                    devDeps: optimizedDevDeps,
-                });
-
-                const shouldInstall = depsHash !== lastInstalledDeps;
-
-                if (!shouldInstall) {
-                    if (term) {
-                        term.writeln(
-                            "\x1b[1;32m✓\x1b[0m Using cached dependencies (skipping install)"
-                        );
-                    }
-                } else {
-                    setStatus("installing");
-
-                    // Check if pnpm is available, fall back to npm
-                    let packageManager = "npm";
-                    let installCmd = ["install"];
-
-                    try {
-                        const pnpmCheck = await webcontainer.spawn("pnpm", [
-                            "--version",
-                        ]);
-                        const pnpmExit = await pnpmCheck.exit;
-                        if (pnpmExit === 0) {
-                            packageManager = "pnpm";
-                            installCmd = [
-                                "install",
-                                "--no-frozen-lockfile",
-                                "--prefer-offline",
-                            ];
-                            if (term) {
-                                term.writeln(
-                                    "\x1b[1;36m→\x1b[0m Using pnpm for faster installs"
-                                );
-                            }
-                        }
-                    } catch {
-                        // pnpm not available, use npm
-                        if (term) {
-                            term.writeln(
-                                "\x1b[2m→ pnpm not available, using npm\x1b[0m"
-                            );
-                        }
-                    }
-
-                    if (term) {
-                        term.writeln(
-                            `\x1b[1;33m→\x1b[0m Installing dependencies with ${packageManager}...`
-                        );
-                    }
-
-                    const startTime = Date.now();
-
-                    const installProcess = await webcontainer.spawn(
-                        packageManager,
-                        installCmd,
-                        {
-                            terminal: {
-                                cols: term?.cols || 80,
-                                rows: term?.rows || 24,
-                            },
-                        }
+                // 9. Install
+                setStatus("installing");
+                if (term) {
+                    term.writeln(
+                        "\x1b[1;33m→\x1b[0m Installing dependencies..."
                     );
-
-                    installProcess.output.pipeTo(
-                        new WritableStream({
-                            write(data) {
-                                if (term) {
-                                    term.write(data);
-                                }
-                            },
-                        })
-                    );
-
-                    const exitCode = await installProcess.exit;
-                    const duration = ((Date.now() - startTime) / 1000).toFixed(
-                        1
-                    );
-
-                    if (exitCode !== 0) {
-                        // If pnpm failed, fallback to npm
-                        if (packageManager === "pnpm") {
-                            if (term) {
-                                term.writeln("");
-                                term.writeln(
-                                    "\x1b[1;33m⚠\x1b[0m pnpm failed, falling back to npm..."
-                                );
-                            }
-                            packageManager = "npm";
-                            installCmd = ["install"];
-
-                            const npmStartTime = Date.now();
-                            const npmProcess = await webcontainer.spawn(
-                                "npm",
-                                installCmd,
-                                {
-                                    terminal: {
-                                        cols: term?.cols || 80,
-                                        rows: term?.rows || 24,
-                                    },
-                                }
-                            );
-
-                            npmProcess.output.pipeTo(
-                                new WritableStream({
-                                    write(data) {
-                                        if (term) term.write(data);
-                                    },
-                                })
-                            );
-
-                            const npmExit = await npmProcess.exit;
-                            const npmDuration = (
-                                (Date.now() - npmStartTime) /
-                                1000
-                            ).toFixed(1);
-
-                            if (npmExit !== 0) {
-                                throw new Error(
-                                    "Installation failed with both pnpm and npm"
-                                );
-                            }
-
-                            if (term) {
-                                term.writeln("");
-                                term.writeln(
-                                    `\x1b[1;32m✓\x1b[0m Dependencies installed with npm in ${npmDuration}s`
-                                );
-                            }
-                        } else {
-                            throw new Error("Installation failed");
-                        }
-                    } else {
-                        if (term) {
-                            term.writeln("");
-                            term.writeln(
-                                `\x1b[1;32m✓\x1b[0m Dependencies installed with ${packageManager} in ${duration}s`
-                            );
-                        }
-                    }
-
-                    setLastInstalledDeps(depsHash);
                 }
 
-                // 10. Starting Server
+                const installProcess = await webcontainer.spawn(
+                    "npm",
+                    ["install"],
+
+                    {
+                        terminal: {
+                            cols: term?.cols || 80,
+                            rows: term?.rows || 24,
+                        },
+                    }
+                );
+
+                installProcess.output.pipeTo(
+                    new WritableStream({
+                        write(data) {
+                            if (term) {
+                                term.write(data);
+                            }
+                        },
+                    })
+                );
+
+                const exitCode = await installProcess.exit;
+                if (exitCode !== 0) {
+                    throw new Error("Installation failed");
+                }
+
+                if (term) {
+                    term.writeln("");
+                    term.writeln("\x1b[1;32m✓\x1b[0m Dependencies installed");
+                }
+
+                // 10. Start Server
                 setStatus("running");
                 if (term) {
                     term.writeln("\x1b[1;36m→\x1b[0m Starting dev server...");
@@ -415,7 +312,7 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
         };
 
         runCode();
-    }, [code, webcontainer, status, lastInstalledDeps]);
+    }, [code, webcontainer, status]);
 
     const handleFileChange = async (path: string, newContent: string) => {
         setParsedFiles((prev) =>
