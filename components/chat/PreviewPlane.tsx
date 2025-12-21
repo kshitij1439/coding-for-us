@@ -2,7 +2,15 @@
 
 import React, { useEffect, useState, useRef } from "react";
 import { useWebContainer } from "@/lib/webcontainer";
-import { Loader2, TerminalSquare, ExternalLink, Code, Zap } from "lucide-react";
+import {
+    Loader2,
+    TerminalSquare,
+    ExternalLink,
+    Code,
+    Zap,
+    Maximize,
+    Shrink,
+} from "lucide-react";
 import MonacoEditor from "./Editor";
 import dynamic from "next/dynamic";
 
@@ -51,6 +59,8 @@ function buildDepMap(list: string[] = []): Record<string, string> {
 export default function PreviewPane({ code }: PreviewPaneProps) {
     const { webcontainer, isLoading: isBooting } = useWebContainer();
     const [url, setUrl] = useState<string>("");
+    const previewRef = useRef<HTMLDivElement>(null);
+    const [isFullscreen, setIsFullscreen] = useState(false);
 
     const [status, setStatus] = useState<
         "idle" | "mounting" | "installing" | "running" | "error"
@@ -313,6 +323,24 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
 
         runCode();
     }, [code, webcontainer, status]);
+    const enterFullscreen = async () => {
+        if (!previewRef.current) return;
+        await previewRef.current.requestFullscreen();
+    };
+
+    const exitFullscreen = async () => {
+        if (document.fullscreenElement) {
+            await document.exitFullscreen();
+        }
+    };
+
+    useEffect(() => {
+        const handler = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+        document.addEventListener("fullscreenchange", handler);
+        return () => document.removeEventListener("fullscreenchange", handler);
+    }, []);
 
     const handleFileChange = async (path: string, newContent: string) => {
         setParsedFiles((prev) =>
@@ -377,6 +405,16 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                     {url || "Waiting for server..."}
                 </div>
 
+                {parsedFiles.length > 0 && (
+                    <button
+                        onClick={
+                            isFullscreen ? exitFullscreen : enterFullscreen
+                        }
+                        className="text-slate-400 hover:text-white transition-colors"
+                    >
+                        {isFullscreen ? <Shrink /> : <Maximize />}
+                    </button>
+                )}
                 {status === "installing" && (
                     <div className="flex items-center space-x-1 text-xs text-emerald-500">
                         <Zap size={12} className="animate-pulse" />
@@ -410,11 +448,13 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                         />
                     </div>
                 ) : url ? (
-                    <iframe
-                        src={url}
-                        className="w-full h-full border-none"
-                        title="Preview"
-                    />
+                    <div ref={previewRef} className="w-full h-full bg-black">
+                        <iframe
+                            src={url}
+                            className="w-full h-full border-none"
+                            title="Preview"
+                        />
+                    </div>
                 ) : (
                     <div className="absolute inset-0 bg-slate-900 flex items-center justify-center text-slate-500">
                         {status === "running" ? (
