@@ -360,7 +360,7 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                     setLastInstalledDeps(depsHash);
                 }
 
-                // 10. Start Server
+                // 10. Starting Server
                 setStatus("running");
                 if (term) {
                     term.writeln("\x1b[1;36m→\x1b[0m Starting dev server...");
