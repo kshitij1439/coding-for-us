@@ -173,6 +173,7 @@ ${fileContext ? `\nCurrent files:\n${fileContext}` : ""}`;
                         googleSearch: {},
                     },
                 ],
+
             },
         });
 
