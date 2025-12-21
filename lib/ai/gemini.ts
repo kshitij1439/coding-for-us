@@ -168,11 +168,11 @@ ${fileContext ? `\nCurrent files:\n${fileContext}` : ""}`;
                 systemInstruction: {
                     parts: [{ text: systemPrompt }],
                 },
-                tools:[
-                  {
-                    googleSearch:{}
-                  }
-                ]
+                tools: [
+                    {
+                        googleSearch: {},
+                    },
+                ],
             },
         });
 
