@@ -163,11 +163,16 @@ ${fileContext ? `\nCurrent files:\n${fileContext}` : ""}`;
                 },
             ],
             config: {
-                temperature: 0.7,
+                // temperature: 0.7,
                 maxOutputTokens: 14000,
                 systemInstruction: {
                     parts: [{ text: systemPrompt }],
                 },
+                tools: [
+                    {
+                        googleSearch: {},
+                    },
+                ],
             },
         });
 
