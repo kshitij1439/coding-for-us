@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { Send, Terminal, Code2, Cpu, Loader2 } from "lucide-react";
+import { Send, Terminal, Code2, Cpu, Loader2, Eye } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -16,10 +16,14 @@ interface Message {
 
 interface ChatInterfaceProps {
     setGeneratedCode: (code: string) => void;
+    onPreviewClick?: () => void;
+    hasGeneratedCode?: boolean;
 }
 
 export default function ChatInterface({
     setGeneratedCode,
+    onPreviewClick,
+    hasGeneratedCode = false,
 }: ChatInterfaceProps) {
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
@@ -27,10 +31,10 @@ export default function ChatInterface({
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ 
+        messagesEndRef.current?.scrollIntoView({
             behavior: "smooth",
             block: "nearest",
-            inline: "nearest"
+            inline: "nearest",
         });
     }, [messages]);
 
@@ -110,7 +114,6 @@ export default function ChatInterface({
                                 parsed.isComplete &&
                                 !codeSentToContainer
                             ) {
-                                // console.log('Sending code to WebContainer:', parsed.codeContent);
                                 setGeneratedCode(parsed.codeContent);
                                 codeSentToContainer = true;
                             }
@@ -169,13 +172,26 @@ export default function ChatInterface({
     return (
         <div className="flex flex-col h-full bg-slate-950 text-slate-100 border-r border-slate-800">
             {/* Header */}
-            <div className="p-4 border-b border-slate-800 flex items-center space-x-2 bg-slate-900/50 backdrop-blur-sm">
-                <div className="w-3 h-3 rounded-full bg-red-500" />
-                <div className="w-3 h-3 rounded-full bg-yellow-500" />
-                <div className="w-3 h-3 rounded-full bg-green-500" />
-                <span className="ml-2 text-sm font-mono text-slate-400">
-                    agent-v1.tsx
-                </span>
+            <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-900/50 backdrop-blur-sm">
+                <div className="flex items-center space-x-2">
+                    <div className="w-3 h-3 rounded-full bg-red-500" />
+                    <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                    <div className="w-3 h-3 rounded-full bg-green-500" />
+                    <span className="ml-2 text-sm font-mono text-slate-400">
+                        agent-v1.tsx
+                    </span>
+                </div>
+
+                {/* Mobile Preview Button */}
+                {hasGeneratedCode && onPreviewClick && (
+                    <button
+                        onClick={onPreviewClick}
+                        className="md:hidden flex items-center space-x-2 px-3 py-1.5 bg-blue-600/20 hover:bg-blue-600/50 text-white rounded-lg transition-colors text-sm"
+                    >
+                        <Eye size={16} />
+                        <span>View App</span>
+                    </button>
+                )}
             </div>
 
             {/* Messages Area */}
@@ -183,7 +199,7 @@ export default function ChatInterface({
                 {messages.length === 0 && (
                     <div className="flex flex-col items-center justify-center h-full text-slate-500 opacity-50">
                         <Cpu size={48} className="mb-4" />
-                        <p className="text-lg">
+                        <p className="text-lg text-center px-4">
                             Ready to build. What's on your mind?
                         </p>
                     </div>
