@@ -312,7 +312,7 @@ export default function PreviewPane({ code, onUrlReady }: PreviewPaneProps) {
                 });
                 webcontainer.on("server-ready", (port, serverUrl) => {
                     setUrl(serverUrl);
-                    onUrlReady?.(serverUrl); 
+                    onUrlReady?.(serverUrl);
                     setTimeout(() => setShowCodeEditor(false), 800);
                 });
             } catch (err) {
