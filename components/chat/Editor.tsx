@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { File, Folder, ChevronRight, ChevronDown } from "lucide-react";
 
 type Framework = "react" | "expo" | "next" | "vite";
@@ -29,6 +29,8 @@ export default function CodeEditor({
     const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
         new Set()
     );
+    const [sidebarWidth, setSidebarWidth] = useState(260); // px
+    const isDraggingRef = useRef(false);
 
     useEffect(() => {
         const allFolders = new Set<string>();
@@ -72,6 +74,28 @@ export default function CodeEditor({
         });
         return tree;
     };
+    useEffect(() => {
+        const onMouseMove = (e: MouseEvent) => {
+            if (!isDraggingRef.current) return;
+            setSidebarWidth((prev) => {
+                const next = prev + e.movementX;
+                return Math.min(Math.max(next, 160), 480); // clamp
+            });
+        };
+
+        const onMouseUp = () => {
+            isDraggingRef.current = false;
+            document.body.style.cursor = "default";
+        };
+
+        window.addEventListener("mousemove", onMouseMove);
+        window.addEventListener("mouseup", onMouseUp);
+
+        return () => {
+            window.removeEventListener("mousemove", onMouseMove);
+            window.removeEventListener("mouseup", onMouseUp);
+        };
+    }, []);
 
     const toggleFolder = (path: string) => {
         setExpandedFolders((prev) => {
@@ -139,9 +163,14 @@ export default function CodeEditor({
     const fileTree = buildFileTree();
 
     return (
-        <div className="flex h-full bg-slate-950 border-l border-slate-800">
+        // <div className="flex h-full bg-slate-950 border-l border-slate-800">
+        <div className="flex h-full bg-slate-950 border-l border-slate-800 select-none">
             {/* Sidebar */}
-            <div className="w-64 border-r border-slate-800 bg-slate-900/50 flex flex-col">
+            <div
+                className="border-r border-slate-800 bg-slate-900/50 flex flex-col"
+                style={{ width: sidebarWidth }}
+            >
+                {/* <div className="w-64 border-r border-slate-800 bg-slate-900/50 flex flex-col"> */}
                 <div className="p-3 border-b border-slate-800 text-xs font-semibold text-slate-400 uppercase tracking-wide">
                     Files{" "}
                     {isStreaming && (
@@ -165,12 +194,23 @@ export default function CodeEditor({
                     )}
                 </div>
             </div>
+            <div
+                onMouseDown={() => {
+                    isDraggingRef.current = true;
+                    document.body.style.cursor = "col-resize";
+                }}
+                className={`w-1 cursor-col-resize ${
+                    isDraggingRef.current ? "bg-blue-500" : "bg-slate-800"
+                }`}
+
+                // className="w-1 bg-slate-800 hover:bg-blue-500 cursor-col-resize transition-colors"
+            />
 
             {/* Editor Area */}
-            <div className="flex-1 flex flex-col relative">
+            <div className="flex-1 flex flex-col relative ">
                 {selectedFile && selectedFileContent ? (
                     <>
-                        <div className="h-10 border-b border-slate-800 flex items-center px-4 bg-slate-900/30 shrink-0">
+                        <div className="h-10 border-b border-slate-800 flex items-center px-4 bg-slate-900/30 shrink-0 ">
                             <File size={14} className="text-slate-400 mr-2" />
                             <span className="text-xs font-mono text-slate-300">
                                 {selectedFile}
@@ -192,7 +232,7 @@ export default function CodeEditor({
                                     }
                                 }}
                                 spellCheck={false}
-                                className="absolute inset-0 w-full h-full p-4 bg-transparent text-slate-300 font-mono text-xs resize-none outline-none border-none leading-relaxed"
+                                className="absolute inset-0 w-full h-full p-4 bg-transparent text-slate-300 font-mono text-xs resize-none outline-none border-none leading-relaxed custom-scrollbar"
                                 style={{
                                     tabSize: 2,
                                 }}
