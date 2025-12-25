@@ -1,505 +1,1194 @@
+// "use client";
+
+// import React, { useEffect, useState, useRef } from "react";
+// import { useWebContainer } from "@/lib/webcontainer";
+// import {
+//     Loader2,
+//     TerminalSquare,
+//     ExternalLink,
+//     Code,
+//     Zap,
+//     Maximize,
+//     Shrink,
+// } from "lucide-react";
+// import MonacoEditor from "./Editor";
+// import dynamic from "next/dynamic";
+
+// const XTerminal = dynamic(() => import("./Terminal"), { ssr: false });
+
+// interface FileItem {
+//     path: string;
+//     content: string;
+//     type?: string;
+// }
+
+// interface PreviewPaneProps {
+//     code: string;
+// }
+
+// function parseDep(raw: string): { name: string; version?: string } {
+//     const dep = raw.trim();
+//     if (!dep) return { name: "" };
+
+//     if (dep.startsWith("@")) {
+//         const lastAt = dep.lastIndexOf("@");
+
+//         if (lastAt > 0) {
+//             return {
+//                 name: dep.slice(0, lastAt),
+//                 version: dep.slice(lastAt + 1) || undefined,
+//             };
+//         }
+//         return { name: dep };
+//     }
+
+//     const [name, version] = dep.split("@");
+//     return { name, version: version || undefined };
+// }
+
+// function buildDepMap(list: string[] = []): Record<string, string> {
+//     const result: Record<string, string> = {};
+//     for (const raw of list) {
+//         const { name, version } = parseDep(raw);
+//         if (!name) continue;
+//         result[name] = version || "latest";
+//     }
+//     return result;
+// }
+
+// export default function PreviewPane({ code }: PreviewPaneProps) {
+//     const { webcontainer, isLoading: isBooting } = useWebContainer();
+//     const [url, setUrl] = useState<string>("");
+//     const previewRef = useRef<HTMLDivElement>(null);
+//     const [isFullscreen, setIsFullscreen] = useState(false);
+
+//     const [status, setStatus] = useState<
+//         "idle" | "mounting" | "installing" | "running" | "error"
+//     >("idle");
+//     const [parsedFiles, setParsedFiles] = useState<FileItem[]>([]);
+//     const [showCodeEditor, setShowCodeEditor] = useState(false);
+//     const [framework, setFramework] = useState<
+//         "react" | "expo" | "next" | "vite"
+//     >("react");
+//     const terminalHandleRef = useRef<any>(null);
+//     const xtermRef = useRef<any>(null);
+//     const processedCodeRef = useRef<string>("");
+
+//     useEffect(() => {
+//         if (terminalHandleRef.current?.terminal) {
+//             xtermRef.current = terminalHandleRef.current.terminal;
+//         }
+//     }, [terminalHandleRef.current?.terminal]);
+
+//     useEffect(() => {
+//         if (!webcontainer) return;
+//         if (!code) return;
+//         if (status === "installing" || status === "running") return;
+//         if (code === processedCodeRef.current) return;
+
+//         processedCodeRef.current = code;
+
+//         const runCode = async () => {
+//             const term = xtermRef.current;
+
+//             try {
+//                 setStatus("mounting");
+//                 setShowCodeEditor(true);
+
+//                 if (term) {
+//                     term.writeln("");
+//                     term.writeln("\x1b[1;36m→\x1b[0m Parsing TOON JSON...");
+//                 }
+
+//                 // 1. Parse JSON
+//                 const jsonMatch = code.match(/```json\n?([\s\S]*?)\n?```/);
+//                 if (!jsonMatch) throw new Error("No JSON code block found");
+//                 const toonJson = JSON.parse(jsonMatch[1]);
+
+//                 let rawFw = toonJson.meta?.fw || "react";
+//                 if (rawFw === "react-vite") rawFw = "vite";
+
+//                 let detectedFramework: "react" | "expo" | "next" | "vite" =
+//                     "react";
+//                 if (rawFw === "expo") detectedFramework = "expo";
+//                 else if (rawFw === "next") detectedFramework = "next";
+//                 else if (rawFw === "vite" || rawFw === "react")
+//                     detectedFramework = "vite";
+
+//                 setFramework(detectedFramework);
+
+//                 if (term) {
+//                     term.writeln(
+//                         `\x1b[1;35m→\x1b[0m Framework: ${detectedFramework}`
+//                     );
+//                 }
+
+//                 // 3. Extract Files
+//                 const extractedFiles: FileItem[] = (toonJson.files || []).map(
+//                     (f: any) => ({ path: f.p, content: f.c, type: f.t })
+//                 );
+//                 setParsedFiles(extractedFiles);
+
+//                 // 4. Build File Tree
+//                 const files: Record<string, any> = {};
+//                 for (const file of toonJson.files || []) {
+//                     const pathParts = file.p.split("/");
+//                     let current = files;
+//                     for (let i = 0; i < pathParts.length - 1; i++) {
+//                         const part = pathParts[i];
+//                         if (!current[part]) current[part] = { directory: {} };
+//                         current = current[part].directory;
+//                     }
+//                     current[pathParts[pathParts.length - 1]] = {
+//                         file: { contents: file.c },
+//                     };
+//                 }
+
+//                 const depsFromMeta: string[] = toonJson.meta?.deps || [
+//                     "react",
+//                     "react-dom",
+//                 ];
+//                 const optimizedDeps = buildDepMap(depsFromMeta);
+//                 const devDepsFromMeta: string[] = toonJson.meta?.devDeps || [];
+//                 const optimizedDevDeps = buildDepMap(devDepsFromMeta);
+
+//                 if (
+//                     detectedFramework === "vite" ||
+//                     detectedFramework === "react"
+//                 ) {
+//                     optimizedDeps["react"] ||= "latest";
+//                     optimizedDeps["react-dom"] ||= "latest";
+//                     optimizedDevDeps["vite"] ||= "latest";
+//                     optimizedDevDeps["@vitejs/plugin-react"] ||= "latest";
+//                 }
+
+//                 if (!files["package.json"]) {
+//                     const scripts: Record<string, string> =
+//                         toonJson.meta?.scripts || {};
+
+//                     if (!scripts.dev) {
+//                         if (detectedFramework === "next") {
+//                             scripts.dev = "next dev";
+//                             scripts.build = "next build";
+//                             scripts.start = "next start";
+//                         } else if (
+//                             detectedFramework === "vite" ||
+//                             detectedFramework === "react"
+//                         ) {
+//                             scripts.dev = "vite --host";
+//                             scripts.build = "vite build";
+//                             scripts.preview = "vite preview";
+//                         } else {
+//                             scripts.dev = "serve . || http-server .";
+//                         }
+//                     }
+
+//                     files["package.json"] = {
+//                         file: {
+//                             contents: JSON.stringify(
+//                                 {
+//                                     name: "app",
+//                                     type: "module",
+//                                     scripts,
+//                                     dependencies: optimizedDeps,
+//                                     devDependencies: optimizedDevDeps,
+//                                 },
+//                                 null,
+//                                 2
+//                             ),
+//                         },
+//                     };
+//                 }
+
+//                 if (
+//                     (detectedFramework === "vite" ||
+//                         detectedFramework === "react") &&
+//                     !files["vite.config.js"] &&
+//                     !files["vite.config.ts"]
+//                 ) {
+//                     files["vite.config.js"] = {
+//                         file: {
+//                             contents: `import { defineConfig } from 'vite'; import react from '@vitejs/plugin-react'; export default defineConfig({ plugins: [react()] });`,
+//                         },
+//                     };
+//                 }
+
+//                 // 8. index.html
+//                 if (!files["index.html"]) {
+//                     files["index.html"] = {
+//                         file: {
+//                             contents: `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>App</title></head><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>`,
+//                         },
+//                     };
+//                 }
+
+//                 if (term) {
+//                     term.writeln("\x1b[1;36m→\x1b[0m Mounting files...");
+//                 }
+//                 await webcontainer.mount(files);
+
+//                 // 9. Install
+//                 setStatus("installing");
+//                 if (term) {
+//                     term.writeln(
+//                         "\x1b[1;33m→\x1b[0m Installing dependencies..."
+//                     );
+//                 }
+
+//                 const installProcess = await webcontainer.spawn(
+//                     "npm",
+//                     ["install"],
+
+//                     {
+//                         terminal: {
+//                             cols: term?.cols || 80,
+//                             rows: term?.rows || 24,
+//                         },
+//                     }
+//                 );
+
+//                 installProcess.output.pipeTo(
+//                     new WritableStream({
+//                         write(data) {
+//                             if (term) {
+//                                 term.write(data);
+//                             }
+//                         },
+//                     })
+//                 );
+
+//                 const exitCode = await installProcess.exit;
+//                 if (exitCode !== 0) {
+//                     throw new Error("Installation failed");
+//                 }
+
+//                 if (term) {
+//                     term.writeln("");
+//                     term.writeln("\x1b[1;32m✓\x1b[0m Dependencies installed");
+//                 }
+
+//                 // 10. Start Server
+//                 setStatus("running");
+//                 if (term) {
+//                     term.writeln("\x1b[1;36m→\x1b[0m Starting dev server...");
+//                     term.writeln("");
+//                 }
+
+//                 const devProcess = await webcontainer.spawn(
+//                     "npm",
+//                     ["run", "dev"],
+//                     {
+//                         terminal: {
+//                             cols: term?.cols || 80,
+//                             rows: term?.rows || 24,
+//                         },
+//                     }
+//                 );
+
+//                 devProcess.output.pipeTo(
+//                     new WritableStream({
+//                         write(data) {
+//                             if (term) {
+//                                 term.write(data);
+//                             }
+//                         },
+//                     })
+//                 );
+
+//                 webcontainer.on("server-ready", (port, serverUrl) => {
+//                     if (term) {
+//                         term.writeln("");
+//                         term.writeln(
+//                             `\x1b[1;32m✓\x1b[0m Server ready at ${serverUrl}`
+//                         );
+//                         term.writeln("");
+//                     }
+//                     setUrl(serverUrl);
+//                     setTimeout(() => setShowCodeEditor(false), 800);
+//                 });
+//             } catch (err) {
+//                 console.error(err);
+//                 setStatus("error");
+//                 if (term) {
+//                     term.writeln("");
+//                     term.writeln(
+//                         `\x1b[1;31m✗\x1b[0m Error: ${
+//                             err instanceof Error ? err.message : String(err)
+//                         }`
+//                     );
+//                     term.writeln("");
+//                 }
+//             }
+//         };
+
+//         runCode();
+//     }, [code, webcontainer, status]);
+//     const enterFullscreen = async () => {
+//         if (!previewRef.current) return;
+//         await previewRef.current.requestFullscreen();
+//     };
+
+//     const exitFullscreen = async () => {
+//         if (document.fullscreenElement) {
+//             await document.exitFullscreen();
+//         }
+//     };
+
+//     useEffect(() => {
+//         const handler = () => {
+//             setIsFullscreen(!!document.fullscreenElement);
+//         };
+//         document.addEventListener("fullscreenchange", handler);
+//         return () => document.removeEventListener("fullscreenchange", handler);
+//     }, []);
+
+//     const handleFileChange = async (path: string, newContent: string) => {
+//         setParsedFiles((prev) =>
+//             prev.map((f) =>
+//                 f.path === path ? { ...f, content: newContent } : f
+//             )
+//         );
+
+//         if (webcontainer) {
+//             try {
+//                 await webcontainer.fs.writeFile(path, newContent);
+
+//                 // Log file change in terminal
+//                 if (xtermRef.current) {
+//                     xtermRef.current.writeln(
+//                         `\x1b[2m[${new Date().toLocaleTimeString()}] File updated: ${path}\x1b[0m`
+//                     );
+//                 }
+//             } catch (err) {
+//                 console.error("Failed to write file:", err);
+//                 if (xtermRef.current) {
+//                     xtermRef.current.writeln(
+//                         `\x1b[1;31m✗\x1b[0m Failed to write ${path}`
+//                     );
+//                 }
+//             }
+//         }
+//     };
+
+//     if (isBooting) {
+//         return (
+//             <div className="flex flex-col items-center justify-center h-full text-slate-400">
+//                 <Loader2 className="animate-spin mb-4" size={32} />
+//                 <p>Booting WebContainer...</p>
+//                 <p className="text-xs text-slate-600 mt-2">
+//                     Initializing in-browser Node environment...
+//                 </p>
+//             </div>
+//         );
+//     }
+
+//     return (
+//         <div className="flex flex-col h-full bg-slate-950 border-l border-slate-800">
+//             {/* Navbar */}
+//             <div className="h-12 border-b border-slate-800 flex items-center px-4 bg-slate-900/50 space-x-3">
+//                 <div className="flex space-x-1.5">
+//                     <div className="w-3 h-3 rounded-full bg-slate-700" />
+//                     <div className="w-3 h-3 rounded-full bg-slate-700" />
+//                 </div>
+
+//                 {parsedFiles.length > 0 && (
+//                     <button
+//                         onClick={() => setShowCodeEditor(!showCodeEditor)}
+//                         className="px-3 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded flex items-center space-x-1 transition-colors"
+//                     >
+//                         <Code size={14} />
+//                         <span>{showCodeEditor ? "Preview" : "Code"}</span>
+//                     </button>
+//                 )}
+
+//                 <div className="flex-1 bg-slate-950 rounded border border-slate-800 h-8 flex items-center px-3 text-xs text-slate-400 font-mono">
+//                     {url || "Waiting for server..."}
+//                 </div>
+
+//                 {parsedFiles.length > 0 && (
+//                     <button
+//                         onClick={
+//                             isFullscreen ? exitFullscreen : enterFullscreen
+//                         }
+//                         className="text-slate-400 hover:text-white transition-colors"
+//                     >
+//                         {isFullscreen ? <Shrink /> : <Maximize />}
+//                     </button>
+//                 )}
+//                 {status === "installing" && (
+//                     <div className="flex items-center space-x-1 text-xs text-emerald-500">
+//                         <Zap size={12} className="animate-pulse" />
+//                         <span>installing</span>
+//                     </div>
+//                 )}
+
+//                 {url && (
+//                     <a
+//                         href={url}
+//                         target="_blank"
+//                         rel="noreferrer"
+//                         className="text-slate-400 hover:text-white transition-colors"
+//                     >
+//                         <ExternalLink size={16} />
+//                     </a>
+//                 )}
+//             </div>
+
+//             {/* Preview / Code */}
+//             <div className="flex-1 relative bg-white">
+//                 {showCodeEditor ? (
+//                     <div className="h-full">
+//                         <MonacoEditor
+//                             files={parsedFiles}
+//                             isStreaming={
+//                                 status === "mounting" || status === "installing"
+//                             }
+//                             framework={framework}
+//                             onFileChange={handleFileChange}
+//                         />
+//                     </div>
+//                 ) : url ? (
+//                     <div ref={previewRef} className="w-full h-full bg-black">
+//                         <iframe
+//                             src={url}
+//                             className="w-full h-full border-none"
+//                             title="Preview"
+//                         />
+//                     </div>
+//                 ) : (
+//                     <div className="absolute inset-0 bg-slate-900 flex items-center justify-center text-slate-500">
+//                         {status === "running" ? (
+//                             <div className="flex flex-col items-center">
+//                                 <Loader2 className="animate-spin mb-2" />
+//                                 <span>Starting server...</span>
+//                             </div>
+//                         ) : status === "installing" ? (
+//                             <div className="flex flex-col items-center space-y-3">
+//                                 <Loader2
+//                                     className="animate-spin mb-2 text-emerald-500"
+//                                     size={32}
+//                                 />
+//                                 <span>Installing dependencies...</span>
+//                             </div>
+//                         ) : status === "mounting" ? (
+//                             <div className="flex flex-col items-center">
+//                                 <Loader2 className="animate-spin mb-2" />
+//                                 <span>Mounting files...</span>
+//                             </div>
+//                         ) : (
+//                             <span>Ready for code execution</span>
+//                         )}
+//                     </div>
+//                 )}
+//             </div>
+
+//             {/* XTerm Terminal */}
+//             <div className="h-64 border-t border-slate-800 bg-black flex flex-col">
+//                 <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800">
+//                     <div className="flex items-center space-x-2 text-xs text-slate-400">
+//                         <TerminalSquare size={14} />
+//                         <span>Terminal</span>
+//                     </div>
+//                     <div className="flex items-center space-x-2">
+//                         <span className="text-[10px] text-slate-600 uppercase">
+//                             {status}
+//                         </span>
+//                     </div>
+//                 </div>
+//                 <XTerminal
+//                     ref={terminalHandleRef}
+//                     webcontainer={webcontainer}
+//                 />
+//             </div>
+//         </div>
+//     );
+// }
+// "use client";
+
+// import React, { useEffect, useState, useRef } from "react";
+// import sdk from "@stackblitz/sdk";
+// import {
+//     Loader2,
+//     ExternalLink,
+//     Zap,
+//     Maximize,
+//     Shrink,
+// } from "lucide-react";
+
+// interface FileItem {
+//     path: string;
+//     content: string;
+//     type?: string;
+// }
+
+// interface PreviewPaneProps {
+//     code: string;
+// }
+
+// function parseDep(raw: string): { name: string; version?: string } {
+//     const dep = raw.trim();
+//     if (!dep) return { name: "" };
+
+//     if (dep.startsWith("@")) {
+//         const lastAt = dep.lastIndexOf("@");
+//         if (lastAt > 0) {
+//             return {
+//                 name: dep.slice(0, lastAt),
+//                 version: dep.slice(lastAt + 1) || undefined,
+//             };
+//         }
+//         return { name: dep };
+//     }
+
+//     const [name, version] = dep.split("@");
+//     return { name, version: version || undefined };
+// }
+
+// function buildDepMap(list: string[] = []): Record<string, string> {
+//     const result: Record<string, string> = {};
+//     for (const raw of list) {
+//         const { name, version } = parseDep(raw);
+//         if (!name) continue;
+//         result[name] = version || "latest";
+//     }
+//     return result;
+// }
+
+// export default function PreviewPane({ code }: PreviewPaneProps) {
+//     const [stackblitzUrl, setStackblitzUrl] = useState<string>("");
+//     const previewRef = useRef<HTMLDivElement>(null);
+//     const iframeRef = useRef<HTMLIFrameElement>(null);
+//     const [isFullscreen, setIsFullscreen] = useState(false);
+
+//     const [status, setStatus] = useState<
+//         "idle" | "parsing" | "creating" | "ready" | "error"
+//     >("idle");
+//     const [framework, setFramework] = useState<string>("react");
+//     const processedCodeRef = useRef<string>("");
+
+//     useEffect(() => {
+//         // Guard: Don't reprocess same code
+//         if (!code) return;
+//         if (code === processedCodeRef.current) return;
+//         if (status === "creating") return;
+    
+//         processedCodeRef.current = code;
+    
+//         const createStackBlitzProject = async () => {
+//             try {
+//                 setStatus("parsing");
+    
+//                 // STEP 1: Parse TOON JSON format
+//                 const jsonMatch = code.match(/```json\n?([\s\S]*?)\n?```/);
+//                 if (!jsonMatch) {
+//                     throw new Error("No JSON code block found in input");
+//                 }
+                
+//                 const toonJson = JSON.parse(jsonMatch[1]);
+//                 console.log("Parsed TOON JSON:", toonJson);
+    
+//                 // STEP 2: Detect framework
+//                 let rawFw = toonJson.meta?.fw || "react";
+//                 if (rawFw === "react-vite") rawFw = "vite";
+//                 setFramework(rawFw);
+    
+//                 // STEP 3: Convert files to StackBlitz format
+//                 const files: Record<string, string> = {};
+//                 for (const file of toonJson.files || []) {
+//                     files[file.p] = file.c;
+//                 }
+    
+//                 // STEP 4: Build dependencies
+//                 const dependencies = buildDepMap(toonJson.meta?.deps || ["react", "react-dom"]);
+//                 const devDependencies = buildDepMap(toonJson.meta?.devDeps || []);
+    
+//                 if (rawFw === "vite" || rawFw === "react") {
+//                     dependencies["react"] ||= "^18.2.0";
+//                     dependencies["react-dom"] ||= "^18.2.0";
+//                     devDependencies["vite"] ||= "^5.0.0";
+//                     devDependencies["@vitejs/plugin-react"] ||= "^4.2.0";
+//                 }
+    
+//                 // STEP 5: Ensure package.json
+//                 if (!files["package.json"]) {
+//                     const scripts = toonJson.meta?.scripts || {
+//                         dev: rawFw === "next" ? "next dev" : (rawFw === "vite" || rawFw === "react" ? "vite" : "npm start")
+//                     };
+//                     files["package.json"] = JSON.stringify({
+//                         name: "generated-app",
+//                         type: "module",
+//                         scripts,
+//                         dependencies,
+//                         devDependencies,
+//                     }, null, 2);
+//                 }
+    
+//                 // STEP 6: Vite configurations
+//                 if ((rawFw === "vite" || rawFw === "react") && !files["vite.config.js"] && !files["vite.config.ts"]) {
+//                     files["vite.config.js"] = `import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\nexport default defineConfig({ plugins: [react()] });`;
+//                 }
+    
+//                 // STEP 7: index.html
+//                 if (!files["index.html"]) {
+//                     files["index.html"] = `<!DOCTYPE html>\n<html><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>`;
+//                 }
+    
+//                 setStatus("creating");
+    
+//                 // STEP 8: Embed using SDK (Fixes CORS)
+//                 if (previewRef.current) {
+//                     // Clear the container before embedding if needed
+//                     previewRef.current.innerHTML = ''; 
+                    
+//                     await sdk.embedProject(
+//                         previewRef.current,
+//                         {
+//                             files,
+//                             title: `App - ${new Date().toLocaleTimeString()}`,
+//                             description: `Framework: ${rawFw}`,
+//                             template: "node", // Required for Vite/Next.js
+//                         },
+//                         {
+//                             openFile: 'src/App.jsx,src/main.jsx',
+//                             view: 'editor',
+//                             height: '100%',
+//                             theme: 'dark',
+//                             hideNavigation: true,
+//                         }
+//                     );
+    
+//                     setStackblitzUrl("Project Ready"); // This triggers your UI to show it's done
+//                     setStatus("ready");
+//                 }
+    
+//             } catch (err) {
+//                 console.error("Error creating StackBlitz project:", err);
+//                 setStatus("error");
+//             }
+//         };
+    
+//         createStackBlitzProject();
+//     }, [code]); // Removed 'status' from deps to prevent infinite loops
+//     const enterFullscreen = async () => {
+//         if (!previewRef.current) return;
+//         try {
+//             await previewRef.current.requestFullscreen();
+//         } catch (err) {
+//             console.error("Fullscreen error:", err);
+//         }
+//     };
+
+//     const exitFullscreen = async () => {
+//         if (document.fullscreenElement) {
+//             await document.exitFullscreen();
+//         }
+//     };
+
+//     useEffect(() => {
+//         const handleFullscreenChange = () => {
+//             setIsFullscreen(!!document.fullscreenElement);
+//         };
+        
+//         document.addEventListener("fullscreenchange", handleFullscreenChange);
+//         return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+//     }, []);
+
+//     return (
+//         <div className="flex flex-col h-full bg-slate-950 border-l border-slate-800">
+//             {/* Top Navigation Bar */}
+//             <div className="h-12 border-b border-slate-800 flex items-center px-4 bg-slate-900/50 space-x-3">
+//                 {/* macOS-style dots */}
+//                 <div className="flex space-x-1.5">
+//                     <div className="w-3 h-3 rounded-full bg-slate-700" />
+//                     <div className="w-3 h-3 rounded-full bg-slate-700" />
+//                     <div className="w-3 h-3 rounded-full bg-slate-700" />
+//                 </div>
+
+//                 {/* Framework badge */}
+//                 {status !== "idle" && (
+//                     <div className="px-2 py-1 text-xs bg-slate-800 text-slate-400 rounded">
+//                         {framework}
+//                     </div>
+//                 )}
+
+//                 {/* URL display */}
+//                 <div className="flex-1 bg-slate-950 rounded border border-slate-800 h-8 flex items-center px-3 text-xs text-slate-400 font-mono">
+//                     {stackblitzUrl ? "StackBlitz Editor" : "Waiting..."}
+//                 </div>
+
+//                 {/* Status indicator */}
+//                 {status === "creating" && (
+//                     <div className="flex items-center space-x-1 text-xs text-emerald-500">
+//                         <Zap size={12} className="animate-pulse" />
+//                         <span>creating</span>
+//                     </div>
+//                 )}
+
+//                 {/* Fullscreen toggle */}
+//                 {stackblitzUrl && (
+//                     <button
+//                         onClick={isFullscreen ? exitFullscreen : enterFullscreen}
+//                         className="text-slate-400 hover:text-white transition-colors"
+//                         title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+//                     >
+//                         {isFullscreen ? <Shrink size={16} /> : <Maximize size={16} />}
+//                     </button>
+//                 )}
+
+//                 {/* Open in new tab */}
+//                 {stackblitzUrl && (
+//                     <a
+//                         href={stackblitzUrl.replace("embed=1", "embed=0")}
+//                         target="_blank"
+//                         rel="noreferrer"
+//                         className="text-slate-400 hover:text-white transition-colors"
+//                         title="Open in new tab"
+//                     >
+//                         <ExternalLink size={16} />
+//                     </a>
+//                 )}
+//             </div>
+// {/* Main Content: StackBlitz Container */}
+// <div ref={previewRef} className="flex-1 relative bg-slate-900">
+//     {/* While we are NOT in the 'ready' status, show the loading overlays.
+//        We use absolute positioning and a high z-index to cover the div 
+//        while the SDK is initializing the iframe in the background.
+//     */}
+//     {status !== "ready" && (
+//         <div className="absolute inset-0 flex items-center justify-center bg-slate-900 z-10">
+//             {status === "idle" && (
+//                 <div className="text-slate-500 text-center">
+//                     <p>Ready to create StackBlitz project</p>
+//                     <p className="text-xs text-slate-600 mt-2">
+//                         Send code to get started
+//                     </p>
+//                 </div>
+//             )}
+            
+//             {status === "parsing" && (
+//                 <div className="flex flex-col items-center text-slate-400">
+//                     <Loader2 className="animate-spin mb-3" size={32} />
+//                     <p>Parsing project files...</p>
+//                 </div>
+//             )}
+            
+//             {status === "creating" && (
+//                 <div className="flex flex-col items-center text-emerald-500">
+//                     <Loader2 className="animate-spin mb-3" size={32} />
+//                     <p>Creating StackBlitz project...</p>
+//                     <p className="text-xs text-slate-600 mt-2">
+//                         This may take a moment
+//                     </p>
+//                 </div>
+//             )}
+            
+//             {status === "error" && (
+//                 <div className="flex flex-col items-center text-red-500">
+//                     <p className="text-lg mb-2">⚠️ Error</p>
+//                     <p>Failed to create StackBlitz project</p>
+//                     <p className="text-xs text-slate-600 mt-2">
+//                         Check console for details
+//                     </p>
+//                 </div>
+//             )}
+//         </div>
+//     )}
+
+//     {/* IMPORTANT: We do NOT render an <iframe> tag here manually. 
+//        The StackBlitz SDK will inject it into this parent div automatically.
+//        The 'z-index' of the loading overlay above ensures it stays hidden 
+//        until it's fully ready.
+//     */}
+// </div>
+//         </div>
+//     );
+// }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// "use client";
+
+// import { useEffect, useRef } from "react";
+// import sdk from "@stackblitz/sdk";
+// import { ExternalLink } from "lucide-react";
+
+// interface PreviewPaneProps {
+//   code: string;
+// }
+
+// /* ---------------- BOOTSTRAP PROJECT ---------------- */
+
+// const BOOTSTRAP_FILES: Record<string, string> = {
+//   "package.json": JSON.stringify(
+//     {
+//       name: "workspace",
+//       private: true,
+//       scripts: { dev: "vite" },
+//       dependencies: {
+//         react: "^18.2.0",
+//         "react-dom": "^18.2.0",
+//       },
+//       devDependencies: {
+//         vite: "^5.0.0",
+//         "@vitejs/plugin-react": "^4.2.0",
+//       },
+//     },
+//     null,
+//     2
+//   ),
+
+//   "vite.config.js": `
+// import { defineConfig } from "vite";
+// import react from "@vitejs/plugin-react";
+// export default defineConfig({ plugins: [react()] });
+// `,
+
+//   "index.html": `
+// <!doctype html>
+// <html>
+//   <body>
+//     <div id="root"></div>
+//     <script type="module" src="/src/main.jsx"></script>
+//   </body>
+// </html>
+// `,
+
+//   "src/main.jsx": `
+// import React from "react";
+// import ReactDOM from "react-dom/client";
+
+// ReactDOM.createRoot(document.getElementById("root")).render(
+//   <h1 style={{ fontFamily: "sans-serif" }}>
+//     Waiting for AI code…
+//   </h1>
+// );
+// `,
+// };
+
+// /* ---------------- COMPONENT ---------------- */
+
+// export default function PreviewPane({ code }: PreviewPaneProps) {
+//   const containerRef = useRef<HTMLDivElement>(null);
+//   const lastCodeRef = useRef<string>("");
+
+//   /* 1️⃣ Embed StackBlitz immediately (editor first) */
+//   useEffect(() => {
+//     if (!containerRef.current) return;
+
+//     sdk.embedProject(
+//       containerRef.current,
+//       {
+//         title: "AI Workspace",
+//         description: "Ready",
+//         template: "node",
+//         files: BOOTSTRAP_FILES,
+//       },
+//       {
+//         view: "editor",
+//         theme: "dark",
+//         height: "100%",
+//         hideNavigation: true,
+//       }
+//     );
+//   }, []);
+
+//   /* 2️⃣ Replace project when AI code arrives */
+//   useEffect(() => {
+//     if (!code) return;
+//     if (!containerRef.current) return;
+//     if (code === lastCodeRef.current) return;
+
+//     lastCodeRef.current = code;
+
+//     try {
+//       const match = code.match(/```json\n?([\s\S]*?)\n?```/);
+//       if (!match) return;
+
+//       const toon = JSON.parse(match[1]);
+
+//       const files: Record<string, string> = {};
+//       for (const f of toon.files || []) {
+//         files[f.p] = f.c;
+//       }
+
+//       containerRef.current.innerHTML = "";
+
+//       sdk.embedProject(
+//         containerRef.current,
+//         {
+//           title: "AI Generated Project",
+//           description: "Generated by AI",
+//           template: "node",
+//           files,
+//         },
+//         {
+//           view: "editor",
+//           theme: "dark",
+//           height: "100%",
+//           hideNavigation: true,
+//         }
+//       );
+//     } catch (err) {
+//       console.error("Failed to load AI project:", err);
+//     }
+//   }, [code]);
+
+//   /* ---------------- UI ---------------- */
+
+//   return (
+//     <div className="flex flex-col h-full bg-slate-950 border-l border-slate-800">
+//       <div className="h-12 flex items-center px-4 border-b border-slate-800 text-slate-400 text-xs">
+//         StackBlitz VS Code
+//         <a
+//           href="https://stackblitz.com"
+//           target="_blank"
+//           rel="noreferrer"
+//           className="ml-auto hover:text-white"
+//         >
+//           <ExternalLink size={14} />
+//         </a>
+//       </div>
+
+//       <div ref={containerRef} className="flex-1 bg-slate-900" />
+//     </div>
+//   );
+// }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
-import { useWebContainer } from "@/lib/webcontainer";
-import {
-    Loader2,
-    TerminalSquare,
-    ExternalLink,
-    Code,
-    Zap,
-    Maximize,
-    Shrink,
-} from "lucide-react";
-import MonacoEditor from "./Editor";
-import dynamic from "next/dynamic";
-
-const XTerminal = dynamic(() => import("./Terminal"), { ssr: false });
-
-interface FileItem {
-    path: string;
-    content: string;
-    type?: string;
-}
+import { useEffect, useRef, useState } from "react";
+import sdk from "@stackblitz/sdk";
 
 interface PreviewPaneProps {
-    code: string;
+  code: string;
+  regenerateKey: number;
 }
 
-function parseDep(raw: string): { name: string; version?: string } {
-    const dep = raw.trim();
-    if (!dep) return { name: "" };
+const BASE_FILES: Record<string, string> = {
+  "package.json": JSON.stringify(
+    {
+      name: "ai-workspace",
+      private: true,
+      scripts: {
+        dev: "vite",
+      },
+      dependencies: {
+        react: "^18.2.0",
+        "react-dom": "^18.2.0",
+      },
+      devDependencies: {
+        vite: "^5.0.0",
+        "@vitejs/plugin-react": "^4.2.0",
+      },
+    },
+    null,
+    2
+  ),
 
-    if (dep.startsWith("@")) {
-        const lastAt = dep.lastIndexOf("@");
+  "vite.config.js": `
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
 
-        if (lastAt > 0) {
-            return {
-                name: dep.slice(0, lastAt),
-                version: dep.slice(lastAt + 1) || undefined,
-            };
-        }
-        return { name: dep };
-    }
+export default defineConfig({
+  plugins: [react()],
+});
+`,
 
-    const [name, version] = dep.split("@");
-    return { name, version: version || undefined };
+  "index.html": `
+<!DOCTYPE html>
+<html lang="en">
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
+`,
+
+  "src/main.jsx": `
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+`,
+
+  "src/App.jsx": `
+export default function App() {
+  return <h1>StackBlitz Ready</h1>;
 }
+`,
+};
 
-function buildDepMap(list: string[] = []): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const raw of list) {
-        const { name, version } = parseDep(raw);
-        if (!name) continue;
-        result[name] = version || "latest";
-    }
-    return result;
-}
+export default function PreviewPane({
+  code,
+  regenerateKey,
+}: PreviewPaneProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const bootedRef = useRef(false);
 
-export default function PreviewPane({ code }: PreviewPaneProps) {
-    const { webcontainer, isLoading: isBooting } = useWebContainer();
-    const [url, setUrl] = useState<string>("");
-    const previewRef = useRef<HTMLDivElement>(null);
-    const [isFullscreen, setIsFullscreen] = useState(false);
+  const [status, setStatus] = useState<
+    "booting" | "ready" | "regenerating" | "error"
+  >("booting");
 
-    const [status, setStatus] = useState<
-        "idle" | "mounting" | "installing" | "running" | "error"
-    >("idle");
-    const [parsedFiles, setParsedFiles] = useState<FileItem[]>([]);
-    const [showCodeEditor, setShowCodeEditor] = useState(false);
-    const [framework, setFramework] = useState<
-        "react" | "expo" | "next" | "vite"
-    >("react");
-    const terminalHandleRef = useRef<any>(null);
-    const xtermRef = useRef<any>(null);
-    const processedCodeRef = useRef<string>("");
+  /* -------------------------------------------------
+     1️⃣ BOOT STACKBLITZ ONCE (VALID PROJECT)
+  --------------------------------------------------*/
+  useEffect(() => {
+    if (!containerRef.current || bootedRef.current) return;
 
-    useEffect(() => {
-        if (terminalHandleRef.current?.terminal) {
-            xtermRef.current = terminalHandleRef.current.terminal;
-        }
-    }, [terminalHandleRef.current?.terminal]);
+    bootedRef.current = true;
 
-    useEffect(() => {
-        if (!webcontainer) return;
-        if (!code) return;
-        if (status === "installing" || status === "running") return;
-        if (code === processedCodeRef.current) return;
-
-        processedCodeRef.current = code;
-
-        const runCode = async () => {
-            const term = xtermRef.current;
-
-            try {
-                setStatus("mounting");
-                setShowCodeEditor(true);
-
-                if (term) {
-                    term.writeln("");
-                    term.writeln("\x1b[1;36m→\x1b[0m Parsing TOON JSON...");
-                }
-
-                // 1. Parse JSON
-                const jsonMatch = code.match(/```json\n?([\s\S]*?)\n?```/);
-                if (!jsonMatch) throw new Error("No JSON code block found");
-                const toonJson = JSON.parse(jsonMatch[1]);
-
-                let rawFw = toonJson.meta?.fw || "react";
-                if (rawFw === "react-vite") rawFw = "vite";
-
-                let detectedFramework: "react" | "expo" | "next" | "vite" =
-                    "react";
-                if (rawFw === "expo") detectedFramework = "expo";
-                else if (rawFw === "next") detectedFramework = "next";
-                else if (rawFw === "vite" || rawFw === "react")
-                    detectedFramework = "vite";
-
-                setFramework(detectedFramework);
-
-                if (term) {
-                    term.writeln(
-                        `\x1b[1;35m→\x1b[0m Framework: ${detectedFramework}`
-                    );
-                }
-
-                // 3. Extract Files
-                const extractedFiles: FileItem[] = (toonJson.files || []).map(
-                    (f: any) => ({ path: f.p, content: f.c, type: f.t })
-                );
-                setParsedFiles(extractedFiles);
-
-                // 4. Build File Tree
-                const files: Record<string, any> = {};
-                for (const file of toonJson.files || []) {
-                    const pathParts = file.p.split("/");
-                    let current = files;
-                    for (let i = 0; i < pathParts.length - 1; i++) {
-                        const part = pathParts[i];
-                        if (!current[part]) current[part] = { directory: {} };
-                        current = current[part].directory;
-                    }
-                    current[pathParts[pathParts.length - 1]] = {
-                        file: { contents: file.c },
-                    };
-                }
-
-                const depsFromMeta: string[] = toonJson.meta?.deps || [
-                    "react",
-                    "react-dom",
-                ];
-                const optimizedDeps = buildDepMap(depsFromMeta);
-                const devDepsFromMeta: string[] = toonJson.meta?.devDeps || [];
-                const optimizedDevDeps = buildDepMap(devDepsFromMeta);
-
-                if (
-                    detectedFramework === "vite" ||
-                    detectedFramework === "react"
-                ) {
-                    optimizedDeps["react"] ||= "latest";
-                    optimizedDeps["react-dom"] ||= "latest";
-                    optimizedDevDeps["vite"] ||= "latest";
-                    optimizedDevDeps["@vitejs/plugin-react"] ||= "latest";
-                }
-
-                if (!files["package.json"]) {
-                    const scripts: Record<string, string> =
-                        toonJson.meta?.scripts || {};
-
-                    if (!scripts.dev) {
-                        if (detectedFramework === "next") {
-                            scripts.dev = "next dev";
-                            scripts.build = "next build";
-                            scripts.start = "next start";
-                        } else if (
-                            detectedFramework === "vite" ||
-                            detectedFramework === "react"
-                        ) {
-                            scripts.dev = "vite --host";
-                            scripts.build = "vite build";
-                            scripts.preview = "vite preview";
-                        } else {
-                            scripts.dev = "serve . || http-server .";
-                        }
-                    }
-
-                    files["package.json"] = {
-                        file: {
-                            contents: JSON.stringify(
-                                {
-                                    name: "app",
-                                    type: "module",
-                                    scripts,
-                                    dependencies: optimizedDeps,
-                                    devDependencies: optimizedDevDeps,
-                                },
-                                null,
-                                2
-                            ),
-                        },
-                    };
-                }
-
-                if (
-                    (detectedFramework === "vite" ||
-                        detectedFramework === "react") &&
-                    !files["vite.config.js"] &&
-                    !files["vite.config.ts"]
-                ) {
-                    files["vite.config.js"] = {
-                        file: {
-                            contents: `import { defineConfig } from 'vite'; import react from '@vitejs/plugin-react'; export default defineConfig({ plugins: [react()] });`,
-                        },
-                    };
-                }
-
-                // 8. index.html
-                if (!files["index.html"]) {
-                    files["index.html"] = {
-                        file: {
-                            contents: `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" /><title>App</title></head><body><div id="root"></div><script type="module" src="/src/main.jsx"></script></body></html>`,
-                        },
-                    };
-                }
-
-                if (term) {
-                    term.writeln("\x1b[1;36m→\x1b[0m Mounting files...");
-                }
-                await webcontainer.mount(files);
-
-                // 9. Install
-                setStatus("installing");
-                if (term) {
-                    term.writeln(
-                        "\x1b[1;33m→\x1b[0m Installing dependencies..."
-                    );
-                }
-
-                const installProcess = await webcontainer.spawn(
-                    "npm",
-                    ["install"],
-
-                    {
-                        terminal: {
-                            cols: term?.cols || 80,
-                            rows: term?.rows || 24,
-                        },
-                    }
-                );
-
-                installProcess.output.pipeTo(
-                    new WritableStream({
-                        write(data) {
-                            if (term) {
-                                term.write(data);
-                            }
-                        },
-                    })
-                );
-
-                const exitCode = await installProcess.exit;
-                if (exitCode !== 0) {
-                    throw new Error("Installation failed");
-                }
-
-                if (term) {
-                    term.writeln("");
-                    term.writeln("\x1b[1;32m✓\x1b[0m Dependencies installed");
-                }
-
-                // 10. Start Server
-                setStatus("running");
-                if (term) {
-                    term.writeln("\x1b[1;36m→\x1b[0m Starting dev server...");
-                    term.writeln("");
-                }
-
-                const devProcess = await webcontainer.spawn(
-                    "npm",
-                    ["run", "dev"],
-                    {
-                        terminal: {
-                            cols: term?.cols || 80,
-                            rows: term?.rows || 24,
-                        },
-                    }
-                );
-
-                devProcess.output.pipeTo(
-                    new WritableStream({
-                        write(data) {
-                            if (term) {
-                                term.write(data);
-                            }
-                        },
-                    })
-                );
-
-                webcontainer.on("server-ready", (port, serverUrl) => {
-                    if (term) {
-                        term.writeln("");
-                        term.writeln(
-                            `\x1b[1;32m✓\x1b[0m Server ready at ${serverUrl}`
-                        );
-                        term.writeln("");
-                    }
-                    setUrl(serverUrl);
-                    setTimeout(() => setShowCodeEditor(false), 800);
-                });
-            } catch (err) {
-                console.error(err);
-                setStatus("error");
-                if (term) {
-                    term.writeln("");
-                    term.writeln(
-                        `\x1b[1;31m✗\x1b[0m Error: ${
-                            err instanceof Error ? err.message : String(err)
-                        }`
-                    );
-                    term.writeln("");
-                }
-            }
-        };
-
-        runCode();
-    }, [code, webcontainer, status]);
-    const enterFullscreen = async () => {
-        if (!previewRef.current) return;
-        await previewRef.current.requestFullscreen();
-    };
-
-    const exitFullscreen = async () => {
-        if (document.fullscreenElement) {
-            await document.exitFullscreen();
-        }
-    };
-
-    useEffect(() => {
-        const handler = () => {
-            setIsFullscreen(!!document.fullscreenElement);
-        };
-        document.addEventListener("fullscreenchange", handler);
-        return () => document.removeEventListener("fullscreenchange", handler);
-    }, []);
-
-    const handleFileChange = async (path: string, newContent: string) => {
-        setParsedFiles((prev) =>
-            prev.map((f) =>
-                f.path === path ? { ...f, content: newContent } : f
-            )
-        );
-
-        if (webcontainer) {
-            try {
-                await webcontainer.fs.writeFile(path, newContent);
-
-                // Log file change in terminal
-                if (xtermRef.current) {
-                    xtermRef.current.writeln(
-                        `\x1b[2m[${new Date().toLocaleTimeString()}] File updated: ${path}\x1b[0m`
-                    );
-                }
-            } catch (err) {
-                console.error("Failed to write file:", err);
-                if (xtermRef.current) {
-                    xtermRef.current.writeln(
-                        `\x1b[1;31m✗\x1b[0m Failed to write ${path}`
-                    );
-                }
-            }
-        }
-    };
-
-    if (isBooting) {
-        return (
-            <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                <Loader2 className="animate-spin mb-4" size={32} />
-                <p>Booting WebContainer...</p>
-                <p className="text-xs text-slate-600 mt-2">
-                    Initializing in-browser Node environment...
-                </p>
-            </div>
-        );
-    }
-
-    return (
-        <div className="flex flex-col h-full bg-slate-950 border-l border-slate-800">
-            {/* Navbar */}
-            <div className="h-12 border-b border-slate-800 flex items-center px-4 bg-slate-900/50 space-x-3">
-                <div className="flex space-x-1.5">
-                    <div className="w-3 h-3 rounded-full bg-slate-700" />
-                    <div className="w-3 h-3 rounded-full bg-slate-700" />
-                </div>
-
-                {parsedFiles.length > 0 && (
-                    <button
-                        onClick={() => setShowCodeEditor(!showCodeEditor)}
-                        className="px-3 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded flex items-center space-x-1 transition-colors"
-                    >
-                        <Code size={14} />
-                        <span>{showCodeEditor ? "Preview" : "Code"}</span>
-                    </button>
-                )}
-
-                <div className="flex-1 bg-slate-950 rounded border border-slate-800 h-8 flex items-center px-3 text-xs text-slate-400 font-mono">
-                    {url || "Waiting for server..."}
-                </div>
-
-                {parsedFiles.length > 0 && (
-                    <button
-                        onClick={
-                            isFullscreen ? exitFullscreen : enterFullscreen
-                        }
-                        className="text-slate-400 hover:text-white transition-colors"
-                    >
-                        {isFullscreen ? <Shrink /> : <Maximize />}
-                    </button>
-                )}
-                {status === "installing" && (
-                    <div className="flex items-center space-x-1 text-xs text-emerald-500">
-                        <Zap size={12} className="animate-pulse" />
-                        <span>installing</span>
-                    </div>
-                )}
-
-                {url && (
-                    <a
-                        href={url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-slate-400 hover:text-white transition-colors"
-                    >
-                        <ExternalLink size={16} />
-                    </a>
-                )}
-            </div>
-
-            {/* Preview / Code */}
-            <div className="flex-1 relative bg-white">
-                {showCodeEditor ? (
-                    <div className="h-full">
-                        <MonacoEditor
-                            files={parsedFiles}
-                            isStreaming={
-                                status === "mounting" || status === "installing"
-                            }
-                            framework={framework}
-                            onFileChange={handleFileChange}
-                        />
-                    </div>
-                ) : url ? (
-                    <div ref={previewRef} className="w-full h-full bg-black">
-                        <iframe
-                            src={url}
-                            className="w-full h-full border-none"
-                            title="Preview"
-                        />
-                    </div>
-                ) : (
-                    <div className="absolute inset-0 bg-slate-900 flex items-center justify-center text-slate-500">
-                        {status === "running" ? (
-                            <div className="flex flex-col items-center">
-                                <Loader2 className="animate-spin mb-2" />
-                                <span>Starting server...</span>
-                            </div>
-                        ) : status === "installing" ? (
-                            <div className="flex flex-col items-center space-y-3">
-                                <Loader2
-                                    className="animate-spin mb-2 text-emerald-500"
-                                    size={32}
-                                />
-                                <span>Installing dependencies...</span>
-                            </div>
-                        ) : status === "mounting" ? (
-                            <div className="flex flex-col items-center">
-                                <Loader2 className="animate-spin mb-2" />
-                                <span>Mounting files...</span>
-                            </div>
-                        ) : (
-                            <span>Ready for code execution</span>
-                        )}
-                    </div>
-                )}
-            </div>
-
-            {/* XTerm Terminal */}
-            <div className="h-64 border-t border-slate-800 bg-black flex flex-col">
-                <div className="flex items-center justify-between px-4 py-2 border-b border-slate-800">
-                    <div className="flex items-center space-x-2 text-xs text-slate-400">
-                        <TerminalSquare size={14} />
-                        <span>Terminal</span>
-                    </div>
-                    <div className="flex items-center space-x-2">
-                        <span className="text-[10px] text-slate-600 uppercase">
-                            {status}
-                        </span>
-                    </div>
-                </div>
-                <XTerminal
-                    ref={terminalHandleRef}
-                    webcontainer={webcontainer}
-                />
-            </div>
-        </div>
+    sdk.embedProject(
+      containerRef.current,
+      {
+        title: "AI Workspace",
+        description: "Fast StackBlitz Workspace",
+        template: "node", // ✅ VALID
+        files: BASE_FILES, // ✅ REQUIRED
+      },
+      {
+        view: "editor",
+        theme: "dark",
+        height: "100%",
+        hideNavigation: true,
+      }
     );
+
+    setStatus("ready");
+  }, []);
+
+  /* -------------------------------------------------
+     2️⃣ REGENERATE PROJECT (USER ACTION ONLY)
+  --------------------------------------------------*/
+  useEffect(() => {
+    if (!code || regenerateKey === 0 || !containerRef.current) return;
+
+    try {
+      setStatus("regenerating");
+
+      const match = code.match(/```json\n?([\s\S]*?)\n?```/);
+      if (!match) throw new Error("No JSON block found");
+
+      const parsed = JSON.parse(match[1]);
+
+      const files: Record<string, string> = {
+        ...BASE_FILES,
+      };
+
+      for (const f of parsed.files || []) {
+        files[f.p] = f.c;
+      }
+
+      containerRef.current.innerHTML = "";
+
+      sdk.embedProject(
+        containerRef.current,
+        {
+          title: "AI Generated Project",
+          description: "Generated by AI",
+          template: "node",
+          files, // ✅ ALWAYS PRESENT
+        },
+        {
+          view: "editor",
+          theme: "dark",
+          height: "100%",
+          hideNavigation: true,
+        }
+      );
+
+      setStatus("ready");
+    } catch (err) {
+      console.error(err);
+      setStatus("error");
+    }
+  }, [regenerateKey]);
+
+  return (
+    <div className="h-full bg-slate-950 border-l border-slate-800">
+      {status !== "ready" && (
+        <div className="absolute inset-0 flex items-center justify-center text-slate-400 z-10">
+          {status === "booting" && "Booting StackBlitz…"}
+          {status === "regenerating" && "Regenerating project…"}
+          {status === "error" && "Failed to load project"}
+        </div>
+      )}
+      <div ref={containerRef} className="h-full" />
+    </div>
+  );
 }
