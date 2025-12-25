@@ -11,15 +11,15 @@ export interface XTerminalRef {
 }
 
 interface XTerminalProps {
-    webcontainer?: any; 
+    webcontainer?: any;
 }
 
 const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(
-    ({ webcontainer }, ref) => {  
+    ({ webcontainer }, ref) => {
         const terminalRef = useRef<HTMLDivElement>(null);
         const xtermRef = useRef<Terminal | null>(null);
         const fitAddonRef = useRef<FitAddon | null>(null);
-        const shellProcessRef = useRef<any>(null);  
+        const shellProcessRef = useRef<any>(null);
 
         useImperativeHandle(ref, () => ({
             terminal: xtermRef.current,
@@ -126,7 +126,7 @@ const XTerminal = forwardRef<XTerminalRef, XTerminalProps>(
             };
         }, [webcontainer]);
 
-        return <div ref={terminalRef} className="flex-1" />;
+        return <div ref={terminalRef} className="flex-1 overflow-hidden" />;
     }
 );
 
