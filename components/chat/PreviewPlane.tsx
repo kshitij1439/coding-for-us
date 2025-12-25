@@ -15,7 +15,10 @@ import MonacoEditor from "./Editor";
 import dynamic from "next/dynamic";
 
 const XTerminal = dynamic(() => import("./Terminal"), { ssr: false });
-
+interface PreviewPaneProps {
+    code: string;
+    onUrlReady?: (url: string) => void;
+}
 interface FileItem {
     path: string;
     content: string;
@@ -56,7 +59,7 @@ function buildDepMap(list: string[] = []): Record<string, string> {
     return result;
 }
 
-export default function PreviewPane({ code }: PreviewPaneProps) {
+export default function PreviewPane({ code, onUrlReady }: PreviewPaneProps) {
     const { webcontainer, isLoading: isBooting } = useWebContainer();
     const [url, setUrl] = useState<string>("");
     const previewRef = useRef<HTMLDivElement>(null);
@@ -304,6 +307,12 @@ export default function PreviewPane({ code }: PreviewPaneProps) {
                         term.writeln("");
                     }
                     setUrl(serverUrl);
+
+                    setTimeout(() => setShowCodeEditor(false), 800);
+                });
+                webcontainer.on("server-ready", (port, serverUrl) => {
+                    setUrl(serverUrl);
+                    onUrlReady?.(serverUrl); 
                     setTimeout(() => setShowCodeEditor(false), 800);
                 });
             } catch (err) {
